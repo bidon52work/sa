@@ -1,0 +1,636 @@
+-- Обернем загрузку в pcall для обработки ошибок
+local success, Rayfield = pcall(function()
+    return loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+end)
+
+-- Проверяем успешность загрузки
+if not success then
+    warn("Ошибка при загрузке Rayfield: ", Rayfield)
+    return
+end
+
+-- Переменные для автоспама
+local autoSpamEnabled = false
+local spamInterval = 5 -- интервал в секундах
+local useAntiBlur = true -- анти-блюр по умолчанию включен
+local useSpecialMode = true -- специальный режим отправки для обхода блокировок
+local lastRemoteEvent = nil -- для сохранения последнего успешного RemoteEvent
+local placeId = game.PlaceId -- ID текущей игры
+
+-- Функция для преобразования текста в формат, который обходит фильтр
+local function bypassTextFilter(message)
+    if not useAntiBlur then return message end
+    
+    -- Методы обхода фильтра
+    local result = message
+    
+    -- Метод 1: Замена букв на похожие символы
+    local replacements = {
+        ["a"] = "а", -- кириллическая а
+        ["e"] = "е", -- кириллическая е
+        ["o"] = "о", -- кириллическая о
+        ["p"] = "р", -- кириллическая р
+        ["x"] = "х", -- кириллическая х
+        ["c"] = "с", -- кириллическая с
+        ["y"] = "у", -- кириллическая у
+        ["i"] = "і", -- другая i
+        ["l"] = "ӏ", -- другая l
+    }
+    
+    -- Заменяем только некоторые буквы для меньшей заметности
+    for eng, cyrillic in pairs(replacements) do
+        -- Заменяем с вероятностью 70%
+        if math.random() < 0.7 then
+            result = result:gsub(eng, cyrillic)
+        end
+    end
+    
+    -- Метод 2: Вставка невидимых символов между буквами
+    local invisible = "​" -- невидимый символ zero-width space
+    local newResult = ""
+    for i = 1, #result do
+        local char = result:sub(i, i)
+        -- С вероятностью 40% добавляем невидимый символ
+        if math.random() < 0.4 then
+            newResult = newResult .. char .. invisible
+        else
+            newResult = newResult .. char
+        end
+    end
+    
+    return newResult
+end
+
+-- Сообщения для доната (стандартные)
+local donationMessages = {
+    "Please donate some robux, I'm new to the game!",
+    "Any spare robux would be appreciated, thank you!",
+    "Looking for kind donations, have a great day!",
+    "Trying to save up for a gamepass, any help is welcome!",
+    "Donations welcome! Thank you for your kindness!",
+    "Need some robux for a new outfit, any donations?",
+    "Saving up for a special item, donations appreciated!",
+    "Any generous people willing to donate some robux?",
+    "Just started playing, any donations would help a lot!",
+    "Robux donations would make my day! Thank you!"
+}
+
+-- Сообщения, которые с меньшей вероятностью будут блюриться
+local safeMessages = {
+    "Hi everyone, I just joined",
+    "Hello, how is your day going?",
+    "This game is so much fun",
+    "Anyone want to be friends?",
+    "I'm saving up for an item",
+    "Does anyone have tips for this game?",
+    "I'm new here, any advice?",
+    "How do you earn money in this game?",
+    "What's the best way to level up?",
+    "Is there a way to get free items?"
+}
+
+local spamThread = nil
+
+-- Улучшенная функция отправки сообщения в чат
+local function sendMessage(message)
+    -- Применяем анти-блюр к сообщению
+    local originalMessage = message
+    message = bypassTextFilter(message)
+    
+    local player = game:GetService("Players").LocalPlayer
+    local replicatedStorage = game:GetService("ReplicatedStorage")
+    
+    -- Проверка на существование игрока
+    if not player then
+        warn("Ошибка отправки: игрок не найден")
+        return false
+    end
+    
+    -- Определяем метод отправки в зависимости от ID игры
+    
+    -- Please Donate (8737602449)
+    if placeId == 8737602449 then
+        -- Специфичный метод для игры Please Donate
+        pcall(function()
+            if replicatedStorage:FindFirstChild("DefaultChatSystemChatEvents") then
+                replicatedStorage.DefaultChatSystemChatEvents.SayMessageRequest:FireServer(message, "All")
+                return true
+            end
+        end)
+    end
+    
+    -- [ID 9872472334] SKIBIDI TOILET (9872472334)
+    if placeId == 9872472334 then
+        pcall(function()
+            game:GetService("TextChatService").TextChannels.RBXGeneral:SendAsync(message)
+            return true
+        end)
+    end
+    
+    -- МЕТОД 1: Безопасный метод через TextChatService (новая система чата Roblox)
+    if useSpecialMode then
+        local success, error = pcall(function()
+            game:GetService("TextChatService").TextChannels.RBXGeneral:SendAsync(message)
+        end)
+        
+        if success then
+            print("Метод 1 (TextChatService): сообщение отправлено")
+            return true
+        end
+    end
+    
+    -- МЕТОД 2: Стандартная система чата Roblox (более надежная)
+    if replicatedStorage:FindFirstChild("DefaultChatSystemChatEvents") then
+        local sayMessageRequest = replicatedStorage.DefaultChatSystemChatEvents:FindFirstChild("SayMessageRequest")
+        if sayMessageRequest then
+            local success, error = pcall(function()
+                sayMessageRequest:FireServer(message, "All")
+            end)
+            
+            if success then
+                print("Метод 2 (DefaultChat): сообщение отправлено")
+                return true
+            end
+        end
+    end
+    
+    -- МЕТОД 3: Использование последнего известного рабочего RemoteEvent
+    if lastRemoteEvent then
+        local success = pcall(function()
+            lastRemoteEvent:FireServer(message)
+        end)
+        
+        if success then
+            print("Метод 3 (LastRemote): сообщение отправлено")
+            return true
+        end
+    end
+    
+    -- МЕТОД 4: Поиск всех RemoteEvent, связанных с чатом
+    for _, v in pairs(replicatedStorage:GetDescendants()) do
+        if v:IsA("RemoteEvent") and (v.Name:lower():find("chat") or v.Name:lower():find("message")) then
+            local success = pcall(function()
+                v:FireServer(message)
+            end)
+            
+            if success then
+                print("Метод 4 (ChatRemote): сообщение отправлено через " .. v:GetFullName())
+                lastRemoteEvent = v
+                return true
+            end
+        end
+    end
+    
+    -- МЕТОД 5: Имитация ввода в чат (наиболее безопасный, но ненадежный)
+    if player:FindFirstChild("PlayerGui") and player.PlayerGui:FindFirstChild("Chat") then
+        local chatBox = player.PlayerGui.Chat:FindFirstChild("ChatBar", true)
+        if chatBox then
+            local success = pcall(function()
+                -- Предотвращаем выполнение других действий в игре
+                local oldPos = nil
+                if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+                    oldPos = player.Character.HumanoidRootPart.Position
+                end
+                
+                -- Захватываем и вводим текст безопасным способом
+                chatBox:CaptureFocus()
+                wait(0.1)
+                chatBox.Text = message
+                wait(0.1)
+                game:GetService("UserInputService"):SendKeyEvent(true, Enum.KeyCode.Return, false, game)
+                wait(0.1)
+                
+                -- Возвращаем позицию, если она изменилась
+                if oldPos and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+                    if (player.Character.HumanoidRootPart.Position - oldPos).Magnitude > 1 then
+                        player.Character.HumanoidRootPart.CFrame = CFrame.new(oldPos)
+                    end
+                end
+            end)
+            
+            if success then
+                print("Метод 5 (ChatBox): сообщение отправлено")
+                return true
+            end
+        end
+    end
+    
+    -- Если все методы не сработали, пробуем отправить оригинальное сообщение без анти-блюра
+    if message ~= originalMessage then
+        print("Пробуем отправить оригинальное сообщение без анти-блюра")
+        return sendMessage(originalMessage)
+    end
+    
+    warn("Не удалось отправить сообщение: все методы не сработали")
+    return false
+end
+
+-- Функция запуска автоспама
+local function startAutoSpam()
+    -- Останавливаем предыдущий поток, если он есть
+    if spamThread then
+        task.cancel(spamThread)
+        spamThread = nil
+    end
+    
+    -- Создаем новый поток для спама
+    spamThread = task.spawn(function()
+        while autoSpamEnabled do
+            -- Выбираем случайное сообщение (с учетом анти-блюра)
+            local messagesList = useAntiBlur and donationMessages or safeMessages
+            local message = messagesList[math.random(1, #messagesList)]
+            
+            -- Отправляем сообщение
+            local success = sendMessage(message)
+            if success then
+                print("Сообщение отправлено: " .. message)
+            else
+                print("Не удалось отправить сообщение. Пробуем другие методы...")
+                
+                -- Пробуем отправить безопасное сообщение в случае неудачи
+                local safeMessage = safeMessages[math.random(1, #safeMessages)]
+                if sendMessage(safeMessage) then
+                    print("Безопасное сообщение отправлено: " .. safeMessage)
+                else
+                    -- Показываем уведомление о проблеме
+                    Rayfield:Notify({
+                        Title = "Предупреждение",
+                        Content = "Проблемы с отправкой сообщений. Попробуйте изменить настройки.",
+                        Duration = 3,
+                    })
+                end
+            end
+            
+            -- Добавляем случайную задержку для естественности
+            local randomDelay = math.random(0, 1000) / 1000
+            task.wait(spamInterval + randomDelay)
+            
+            -- Проверяем, включен ли еще автоспам
+            if not autoSpamEnabled then
+                break
+            end
+        end
+    end)
+end
+
+-- Функция остановки автоспама
+local function stopAutoSpam()
+    autoSpamEnabled = false
+    if spamThread then
+        task.cancel(spamThread)
+        spamThread = nil
+    end
+    print("Автоспам остановлен")
+end
+
+-- Функция для получения информации о текущей игре
+local function getGameInfo()
+    local placeName = "Неизвестно"
+    
+    pcall(function()
+        placeName = game:GetService("MarketplaceService"):GetProductInfo(placeId).Name
+    end)
+    
+    return "ID игры: " .. tostring(placeId) .. "\nНазвание: " .. placeName
+end
+
+-- Функция анти-АФК
+local function startAntiAFK()
+    spawn(function()
+        local VU = game:GetService("VirtualUser")
+        game:GetService("Players").LocalPlayer.Idled:Connect(function()
+            VU:Button2Down(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+            wait(1)
+            VU:Button2Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+            print("Анти-АФК сработал")
+        end)
+        print("Анти-АФК включен")
+    end)
+end
+
+-- Создаем главное окно
+local Window = Rayfield:CreateWindow({
+    Name = "Auto Robux Farm",
+    LoadingTitle = "Auto Robux Farm",
+    LoadingSubtitle = "by Sirius",
+    KeySystem = false,
+    ConfigurationSaving = {
+        Enabled = true,
+        FolderName = "RayfieldScripts",
+        FileName = "Config"
+    },
+    Discord = {
+        Enabled = false,
+        Invite = "noinvitelink",
+        RememberJoins = true
+    }
+})
+
+-- Создаем основную вкладку
+local MainTab = Window:CreateTab("Основные функции", 4483362458)
+
+-- Создаем раздел автоспама
+local SpamSection = MainTab:CreateSection("Автоспам в чат")
+
+-- Добавляем анти-АФК
+startAntiAFK()
+
+-- Создаем переключатель для автоспама
+local SpamToggle = MainTab:CreateToggle({
+    Name = "Автоспам сообщений",
+    CurrentValue = false,
+    Flag = "SpamToggle",
+    Callback = function(Value)
+        autoSpamEnabled = Value
+        if autoSpamEnabled then
+            Rayfield:Notify({
+                Title = "Автоспам включен",
+                Content = "Сообщения будут отправляться каждые " .. spamInterval .. " секунд",
+                Duration = 3,
+            })
+            startAutoSpam()
+        else
+            Rayfield:Notify({
+                Title = "Автоспам отключен",
+                Content = "Отправка сообщений остановлена",
+                Duration = 3,
+            })
+            stopAutoSpam()
+        end
+    end,
+})
+
+-- Создаем переключатель для анти-блюра
+local AntiBlurToggle = MainTab:CreateToggle({
+    Name = "Анти-блюр сообщений",
+    CurrentValue = useAntiBlur,
+    Flag = "AntiBlurToggle",
+    Callback = function(Value)
+        useAntiBlur = Value
+        if Value then
+            Rayfield:Notify({
+                Title = "Анти-блюр включен",
+                Content = "Сообщения будут изменены для обхода фильтрации",
+                Duration = 3,
+            })
+        else
+            Rayfield:Notify({
+                Title = "Анти-блюр выключен",
+                Content = "Сообщения будут отправляться без изменений",
+                Duration = 3,
+            })
+        end
+    end,
+})
+
+-- Создаем переключатель для специального режима
+local SpecialModeToggle = MainTab:CreateToggle({
+    Name = "Специальный режим отправки",
+    CurrentValue = useSpecialMode,
+    Flag = "SpecialModeToggle",
+    Callback = function(Value)
+        useSpecialMode = Value
+        if Value then
+            Rayfield:Notify({
+                Title = "Специальный режим включен",
+                Content = "Используется альтернативный метод отправки",
+                Duration = 3,
+            })
+        else
+            Rayfield:Notify({
+                Title = "Специальный режим выключен",
+                Content = "Используется стандартный метод отправки",
+                Duration = 3,
+            })
+        end
+    end,
+})
+
+-- Создаем слайдер для интервала
+local IntervalSlider = MainTab:CreateSlider({
+    Name = "Интервал сообщений (секунды)",
+    Range = {3, 30},
+    Increment = 1,
+    Suffix = "сек",
+    CurrentValue = spamInterval,
+    Flag = "IntervalSlider",
+    Callback = function(Value)
+        spamInterval = Value
+        print("Интервал сообщений установлен на " .. Value .. " секунд")
+        
+        -- Если автоспам включен, перезапускаем его с новым интервалом
+        if autoSpamEnabled then
+            startAutoSpam()
+        end
+    end,
+})
+
+-- Создаем кнопку для теста отправки сообщения
+local TestButton = MainTab:CreateButton({
+    Name = "Тест отправки сообщения",
+    Callback = function()
+        local messagesList = useAntiBlur and donationMessages or safeMessages
+        local message = messagesList[math.random(1, #messagesList)]
+        local success = sendMessage(message)
+        
+        if success then
+            Rayfield:Notify({
+                Title = "Тест успешен",
+                Content = "Сообщение успешно отправлено",
+                Duration = 3,
+            })
+        else
+            Rayfield:Notify({
+                Title = "Ошибка",
+                Content = "Не удалось отправить тестовое сообщение",
+                Duration = 5,
+            })
+        end
+    end,
+})
+
+-- Создаем кнопку для получения информации о игре
+MainTab:CreateButton({
+    Name = "Информация о текущей игре",
+    Callback = function()
+        local gameInfo = getGameInfo()
+        
+        Rayfield:Notify({
+            Title = "Информация об игре",
+            Content = gameInfo,
+            Duration = 6,
+        })
+        
+        print("Информация об игре: " .. gameInfo)
+    end,
+})
+
+-- Создаем вкладку для настроек
+local SettingsTab = Window:CreateTab("Настройки", 4483362458)
+
+-- Создаем раздел для настроек сообщений
+local MessagesSection = SettingsTab:CreateSection("Настройка сообщений")
+
+-- Добавляем кнопку для русских сообщений
+SettingsTab:CreateButton({
+    Name = "Установить сообщения на русском",
+    Callback = function()
+        donationMessages = {
+            "Пожалуйста, подарите немного робуксов, я новичок в игре!",
+            "Буду благодарен за любые робуксы, спасибо!",
+            "Ищу добрых людей для пожертвований, хорошего дня!",
+            "Пытаюсь накопить на гейм-пасс, любая помощь приветствуется!",
+            "Принимаю пожертвования! Спасибо за вашу доброту!",
+            "Нужны робуксы на новый наряд, поможете?",
+            "Коплю на особый предмет, пожертвования приветствуются!",
+            "Есть щедрые люди, готовые подарить немного робуксов?",
+            "Только начал играть, любые пожертвования очень помогут!",
+            "Ваши робуксы сделают мой день лучше! Спасибо!"
+        }
+        
+        safeMessages = {
+            "Привет всем, я только присоединился",
+            "Здравствуйте, как проходит ваш день?",
+            "Эта игра очень интересная",
+            "Кто-нибудь хочет дружить?",
+            "Я коплю на одну вещь",
+            "Есть советы по этой игре?",
+            "Я новичок здесь, подскажите что-нибудь",
+            "Как здесь зарабатывать деньги?",
+            "Как лучше всего повысить уровень?",
+            "Есть способ получить бесплатные предметы?"
+        }
+        
+        Rayfield:Notify({
+            Title = "Сообщения обновлены",
+            Content = "Установлены русские сообщения",
+            Duration = 3,
+        })
+    end,
+})
+
+-- Добавляем кнопку для английских сообщений
+SettingsTab:CreateButton({
+    Name = "Установить сообщения на английском",
+    Callback = function()
+        donationMessages = {
+            "Please donate some robux, I'm new to the game!",
+            "Any spare robux would be appreciated, thank you!",
+            "Looking for kind donations, have a great day!",
+            "Trying to save up for a gamepass, any help is welcome!",
+            "Donations welcome! Thank you for your kindness!",
+            "Need some robux for a new outfit, any donations?",
+            "Saving up for a special item, donations appreciated!",
+            "Any generous people willing to donate some robux?",
+            "Just started playing, any donations would help a lot!",
+            "Robux donations would make my day! Thank you!"
+        }
+        
+        safeMessages = {
+            "Hi everyone, I just joined",
+            "Hello, how is your day going?",
+            "This game is so much fun",
+            "Anyone want to be friends?",
+            "I'm saving up for an item",
+            "Does anyone have tips for this game?",
+            "I'm new here, any advice?",
+            "How do you earn money in this game?",
+            "What's the best way to level up?",
+            "Is there a way to get free items?"
+        }
+        
+        Rayfield:Notify({
+            Title = "Сообщения обновлены",
+            Content = "Установлены английские сообщения",
+            Duration = 3,
+        })
+    end,
+})
+
+-- Добавляем кнопку для безопасных сообщений
+SettingsTab:CreateButton({
+    Name = "Использовать безопасные сообщения",
+    Callback = function()
+        useAntiBlur = false
+        AntiBlurToggle:Set(false)
+        
+        Rayfield:Notify({
+            Title = "Режим изменен",
+            Content = "Включен режим безопасных сообщений. Анти-блюр отключен.",
+            Duration = 3,
+        })
+    end,
+})
+
+-- Создаем вкладку для специальных настроек
+local AdvancedTab = Window:CreateTab("Расширенные настройки", 4483362458)
+
+-- Создаем раздел для специальных настроек
+AdvancedTab:CreateSection("Настройки для конкретных игр")
+
+-- Добавляем кнопку для Please Donate
+AdvancedTab:CreateButton({
+    Name = "Оптимизировать для Please Donate",
+    Callback = function()
+        useAntiBlur = true
+        AntiBlurToggle:Set(true)
+        useSpecialMode = false
+        SpecialModeToggle:Set(false)
+        spamInterval = 8
+        IntervalSlider:Set(8)
+        
+        Rayfield:Notify({
+            Title = "Настройки применены",
+            Content = "Оптимизировано для игры Please Donate",
+            Duration = 3,
+        })
+    end,
+})
+
+-- Добавляем кнопку для Pet Simulator X
+AdvancedTab:CreateButton({
+    Name = "Оптимизировать для Pet Simulator X",
+    Callback = function()
+        useAntiBlur = true
+        AntiBlurToggle:Set(true)
+        useSpecialMode = true
+        SpecialModeToggle:Set(true)
+        spamInterval = 10
+        IntervalSlider:Set(10)
+        
+        Rayfield:Notify({
+            Title = "Настройки применены",
+            Content = "Оптимизировано для игры Pet Simulator X",
+            Duration = 3,
+        })
+    end,
+})
+
+-- Добавляем кнопку для Blox Fruits
+AdvancedTab:CreateButton({
+    Name = "Оптимизировать для Blox Fruits",
+    Callback = function()
+        useAntiBlur = false
+        AntiBlurToggle:Set(false)
+        useSpecialMode = false
+        SpecialModeToggle:Set(false)
+        spamInterval = 15
+        IntervalSlider:Set(15)
+        
+        Rayfield:Notify({
+            Title = "Настройки применены",
+            Content = "Оптимизировано для игры Blox Fruits",
+            Duration = 3,
+        })
+    end,
+})
+
+-- Отображаем уведомление о загрузке скрипта
+Rayfield:Notify({
+    Title = "Скрипт обновлен",
+    Content = "Auto Robux Farm с функцией анти-блюра успешно загружен!",
+    Duration = 5,
+})
+
+-- Сообщение в консоль для подтверждения загрузки
+print("Auto Robux Farm с функцией анти-блюра успешно загружен!")
